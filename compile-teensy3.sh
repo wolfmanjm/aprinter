@@ -3,8 +3,10 @@
 set -e
 set -x
 
-CROSS=/home/ambro/gcc-arm-none-eabi-4_7-2013q3/bin/arm-none-eabi-
-TEENSY_CORES=/home/ambro/cores
+CROSS=/opt/arduino/hardware/tools/arm-none-eabi/bin/arm-none-eabi-
+TEENSY_CORES=/datadisk/aux/Stuff/reprap/Firmwares/aprinter/cores
+#CROSS=/home/ambro/gcc-arm-none-eabi-4_7-2013q3/bin/arm-none-eabi-
+#TEENSY_CORES=/home/ambro/cores
 MAIN=aprinter/printer/aprinter-teensy3.cpp
 
 CC=${CC:-${CROSS}gcc}
