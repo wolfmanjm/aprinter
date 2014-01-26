@@ -33,11 +33,8 @@
 #include <aprinter/meta/TypeListGet.h>
 #include <aprinter/meta/TypeListIndex.h>
 #include <aprinter/meta/IndexElemTuple.h>
-#include <aprinter/meta/TuplePosition.h>
 #include <aprinter/meta/TupleForEach.h>
-#include <aprinter/meta/TupleGet.h>
 #include <aprinter/meta/IsEqualFunc.h>
-#include <aprinter/meta/ComposeFunctions.h>
 #include <aprinter/meta/TypesAreEqual.h>
 #include <aprinter/meta/RemoveReference.h>
 #include <aprinter/meta/MakeTypeList.h>
@@ -48,17 +45,20 @@
 
 template <typename FtmSpec, int ChannelIndex>
 struct Mk20Clock__IrqCompHelper {
-    static void call () {}
+    template <typename IrqTime>
+    static void call (IrqTime irq_time) {}
 };
 
 #include <aprinter/BeginNamespace.h>
 
-template <uint32_t TScAddr, uint32_t TCntAddr, uint32_t TModAddr, uint32_t TCntinAddr, uint32_t TScgc6Bit, int TIrq, typename TChannels>
+template <uint32_t TScAddr, uint32_t TCntAddr, uint32_t TModAddr, uint32_t TCntinAddr, uint32_t TModeAddr, uint32_t TStatusAddr, uint32_t TScgc6Bit, int TIrq, typename TChannels>
 struct Mk20ClockFTM {
     static uint32_t volatile * sc () { return (uint32_t volatile *)TScAddr; }
     static uint32_t volatile * cnt () { return (uint32_t volatile *)TCntAddr; }
     static uint32_t volatile * mod () { return (uint32_t volatile *)TModAddr; }
     static uint32_t volatile * cntin () { return (uint32_t volatile *)TCntinAddr; }
+    static uint32_t volatile * mode () { return (uint32_t volatile *)TModeAddr; }
+    static uint32_t volatile * status () { return (uint32_t volatile *)TStatusAddr; }
     static uint32_t const Scgc6Bit = TScgc6Bit;
     static const int Irq = TIrq;
     using Channels = TChannels;
@@ -70,7 +70,7 @@ struct Mk20Clock__Channel {
     static uint32_t volatile * cv () { return (uint32_t volatile *)TCvAddr; }
 };
 
-using Mk20ClockFTM0 = Mk20ClockFTM<(uint32_t)&FTM0_SC, (uint32_t)&FTM0_CNT, (uint32_t)&FTM0_MOD, (uint32_t)&FTM0_CNTIN, SIM_SCGC6_FTM0, IRQ_FTM0, MakeTypeList<
+using Mk20ClockFTM0 = Mk20ClockFTM<(uint32_t)&FTM0_SC, (uint32_t)&FTM0_CNT, (uint32_t)&FTM0_MOD, (uint32_t)&FTM0_CNTIN, (uint32_t)&FTM0_MODE, (uint32_t)&FTM0_STATUS, SIM_SCGC6_FTM0, IRQ_FTM0, MakeTypeList<
     Mk20Clock__Channel<(uint32_t)&FTM0_C0SC, (uint32_t)&FTM0_C0V>,
     Mk20Clock__Channel<(uint32_t)&FTM0_C1SC, (uint32_t)&FTM0_C1V>,
     Mk20Clock__Channel<(uint32_t)&FTM0_C2SC, (uint32_t)&FTM0_C2V>,
@@ -80,7 +80,7 @@ using Mk20ClockFTM0 = Mk20ClockFTM<(uint32_t)&FTM0_SC, (uint32_t)&FTM0_CNT, (uin
     Mk20Clock__Channel<(uint32_t)&FTM0_C6SC, (uint32_t)&FTM0_C6V>,
     Mk20Clock__Channel<(uint32_t)&FTM0_C7SC, (uint32_t)&FTM0_C7V>
 >>;
-using Mk20ClockFTM1 = Mk20ClockFTM<(uint32_t)&FTM1_SC, (uint32_t)&FTM1_CNT, (uint32_t)&FTM1_MOD, (uint32_t)&FTM1_CNTIN, SIM_SCGC6_FTM1, IRQ_FTM1, MakeTypeList<
+using Mk20ClockFTM1 = Mk20ClockFTM<(uint32_t)&FTM1_SC, (uint32_t)&FTM1_CNT, (uint32_t)&FTM1_MOD, (uint32_t)&FTM1_CNTIN, (uint32_t)&FTM1_MODE, (uint32_t)&FTM1_STATUS, SIM_SCGC6_FTM1, IRQ_FTM1, MakeTypeList<
     Mk20Clock__Channel<(uint32_t)&FTM1_C0SC, (uint32_t)&FTM1_C0V>,
     Mk20Clock__Channel<(uint32_t)&FTM1_C1SC, (uint32_t)&FTM1_C1V>
 >>;
@@ -99,6 +99,7 @@ class Mk20Clock
     friend class Mk20ClockInterruptTimer;
     
     AMBRO_DECLARE_TUPLE_FOREACH_HELPER(Foreach_init, init)
+    AMBRO_DECLARE_TUPLE_FOREACH_HELPER(Foreach_init_start, init_start)
     AMBRO_DECLARE_TUPLE_FOREACH_HELPER(Foreach_deinit, deinit)
     AMBRO_DECLARE_TUPLE_FOREACH_HELPER(Foreach_irq_helper, irq_helper)
     
@@ -132,23 +133,30 @@ private:
         static void init (Context c)
         {
             SIM_SCGC6 |= FtmSpec::Scgc6Bit;
-            *FtmSpec::sc();
-            *FtmSpec::sc() = FTM_SC_PS(Prescale);
+            *FtmSpec::mode() = FTM_MODE_FTMEN;
+            *FtmSpec::sc() = FTM_SC_PS(Prescale) | (FtmIndex == 0 ? FTM_SC_TOIE : 0);
             *FtmSpec::mod() = UINT16_C(0xFFFF);
+            *FtmSpec::cntin() = (FtmIndex == 0) ? 1 : 0;
+            *FtmSpec::cnt() = 0; // this actually sets CNT to the value in CNTIN above
             *FtmSpec::cntin() = 0;
             NVIC_CLEAR_PENDING(FtmSpec::Irq);
             NVIC_SET_PRIORITY(FtmSpec::Irq, INTERRUPT_PRIORITY);
             NVIC_ENABLE_IRQ(FtmSpec::Irq);
-            if (FtmIndex > 0) {
-                *FtmSpec::cnt() = *MyFtm<0>::FtmSpec::cnt() - 1;
-            }
-            *FtmSpec::sc() |= FTM_SC_CLKS(1) | (FtmIndex == 0 ? FTM_SC_TOIE : 0);
+        }
+        
+        static void init_start (Context c)
+        {
+            *FtmSpec::sc() |= FTM_SC_CLKS(1);
         }
         
         static void deinit (Context c)
         {
             NVIC_DISABLE_IRQ(FtmSpec::Irq);
             *FtmSpec::sc() = 0;
+            *FtmSpec::sc();
+            *FtmSpec::sc() = 0;
+            *FtmSpec::status();
+            *FtmSpec::status() = 0;
             NVIC_CLEAR_PENDING(FtmSpec::Irq);
             SIM_SCGC6 &= ~FtmSpec::Scgc6Bit;
         }
@@ -164,17 +172,20 @@ private:
                     o->m_offset++;
                 }
             }
+            *FtmSpec::status();
+            *FtmSpec::status() = 0;
+            TimeType irq_time = get_time_interrupt(c);
             ChannelsTuple dummy;
-            TupleForEachForward(&dummy, Foreach_irq_helper(), c);
+            TupleForEachForward(&dummy, Foreach_irq_helper(), c, irq_time);
         }
         
         template <int ChannelIndex>
         struct Channel {
             using ChannelSpec = TypeListGet<Channels, ChannelIndex>;
             
-            static void irq_helper (InterruptContext<Context> c)
+            static void irq_helper (InterruptContext<Context> c, TimeType irq_time)
             {
-                Mk20Clock__IrqCompHelper<FtmSpec, ChannelIndex>::call();
+                Mk20Clock__IrqCompHelper<FtmSpec, ChannelIndex>::call(irq_time);
             }
         };
         
@@ -192,8 +203,10 @@ public:
         Mk20Clock *o = self(c);
         
         o->m_offset = 0;
+        
         MyFtmsTuple dummy;
         TupleForEachForward(&dummy, Foreach_init(), c);
+        TupleForEachForward(&dummy, Foreach_init_start(), c);
         
         o->debugInit(c);
     }
@@ -323,7 +336,7 @@ public:
             }
             *Channel::cv() = time;
             *Channel::csc();
-            *Channel::csc() = FTM_CSC_CHIE;
+            *Channel::csc() = FTM_CSC_MSA | FTM_CSC_CHIE;
         }
     }
     
@@ -358,23 +371,17 @@ public:
 #endif
     }
     
-    static void irq_handler (InterruptContext<Context> c)
+    static void irq_handler (InterruptContext<Context> c, TimeType irq_time)
     {
         Mk20ClockInterruptTimer *o = self(c);
         
-        uint32_t csc = *Channel::csc();
-        if (!(csc & FTM_CSC_CHIE)) {
+        if (!(*Channel::csc() & FTM_CSC_CHIE)) {
             return;
         }
         
         AMBRO_ASSERT(o->m_running)
         
-        *Channel::csc() = (csc & ~FTM_CSC_CHF);
-        
-        TimeType now = Clock::get_time_interrupt(c);
-        now -= o->m_time;
-        
-        if (now < UINT32_C(0x80000000)) {
+        if ((TimeType)(irq_time - o->m_time) < UINT32_C(0x80000000)) {
             if (!Handler::call(o, c)) {
 #ifdef AMBROLIB_ASSERTIONS
                 o->m_running = false;
@@ -385,7 +392,7 @@ public:
     }
     
 private:
-    static const TimeType clearance = (64 / Clock::prescale_divide) + 2;
+    static const TimeType clearance = (128 / Clock::prescale_divide) + 2;
     
     TimeType m_time;
 #ifdef AMBROLIB_ASSERTIONS
@@ -423,9 +430,10 @@ static_assert( \
 ); \
 template <> \
 struct Mk20Clock__IrqCompHelper<ftmspec, channel_index> { \
-    static void call () \
+    template <typename IrqTime> \
+    static void call (IrqTime irq_time) \
     { \
-        (timer).irq_handler(MakeInterruptContext((context))); \
+        (timer).irq_handler(MakeInterruptContext((context)), irq_time); \
     } \
 };
 
